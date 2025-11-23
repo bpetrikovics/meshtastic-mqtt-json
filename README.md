@@ -84,16 +84,15 @@ If no callback is registered for a message type, the message will be printed to 
 
 FIXME: Correct this for multiple channels support
 
-| Option       | Description                   | Default               |
-| ------------ | ------------------------------|---------------------- |
-| `--broker`   | MQTT broker address           | `mqtt.meshtastic.org` |
-| `--port`     | MQTT broker port              | `1883`                |   
-| `--root`     | Root topic                    | `msh/US/2/e/`         |
-| `--channel`  | Channel name                  | `LongFast`            |
-| `--username` | MQTT username                 | `meshdev`             |
-| `--password` | MQTT password                 | `large4cats`          |
-| `--key`      | Encryption key                | `AQ==`                |
-| `--filter`   | Filter specific message types |                       |
+| Option       | Description                   | Default                         |
+| ------------ | ------------------------------|-------------------------------- |
+| `--broker`   | MQTT broker address           | `mqtt.meshtastic.org`           |
+| `--port`     | MQTT broker port              | `1883`                          |   
+| `--root`     | Root topic                    | `msh/US/2/e/`                   |
+| `--channels  | MQTT channels and their keys  | `{'LongFast': {'key': 'AQ=='}}` |
+| `--username` | MQTT username                 | `meshdev`                       |
+| `--password` | MQTT password                 | `large4cats`                    |
+| `--filter`   | Filter specific message types |                                 |
 
 ### Filter Example
 ```bash
