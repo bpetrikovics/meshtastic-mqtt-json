@@ -5,6 +5,7 @@ import argparse
 import base64
 import json
 import time
+import logging
 
 try:
 	from cryptography.hazmat.backends           import default_backend
@@ -54,7 +55,7 @@ class MeshtasticMQTT(object):
 
 		self.client		   = None
 		self.broadcast_id  = 4294967295 # Our channel ID
-		self.key           = None
+		self.channels      = {}
 		self.names         = {}
 		self.filters       = None
 		self.callbacks     = {}  # Dictionary to store message type callbacks
@@ -101,18 +102,19 @@ class MeshtasticMQTT(object):
 			print(f'{json.dumps(json_packet)}')
 
 
-	def connect(self, broker: str, port: int, root: str, channel: str, username: str, password: str, key: str):
+	def connect(self, broker: str, port: int, root: str, channels: dict, username: str, password: str):
 		'''
 		Connect to the MQTT broker
 
 		:param broker:   The MQTT broker address
 		:param port:     The MQTT broker port
 		:param root:     The root topic
-		:param channel:  The channel name
 		:param username: The MQTT username
+		:param channels: Dict, key: channel name, value: channel psk
 		:param password: The MQTT password
-		:param key:      The encryption key
 		'''
+
+		self.logger = logging.getLogger(__name__)
 
 		# Initialize the MQTT client
 		self.client = mqtt.Client(mqtt.CallbackAPIVersion.VERSION2, client_id='', clean_session=True, userdata=None)
@@ -121,17 +123,24 @@ class MeshtasticMQTT(object):
 		# Set the username and password for the MQTT broker
 		self.client.username_pw_set(username=username, password=password)
 
-		# Set the encryption key
-		self.key = '1PG7OiApB1nwvP+rz05pAQ==' if key == 'AQ==' else key
+		# Set the encryption key for each channels
+		self.channels = {}
 
-		# Prepare the key for decryption
-		try:
-			padded_key = self.key.ljust(len(self.key) + ((4 - (len(self.key) % 4)) % 4), '=')
-			replaced_key = padded_key.replace('-', '+').replace('_', '/')
-			self.key_bytes = base64.b64decode(replaced_key.encode('ascii'))
-		except Exception as e:
-			print(f'Error decoding key: {e}')
-			raise
+		for channel, data in channels.items():
+			self.logger.info("Setting up channel key for %s", channel)
+			if data.get('key') == 'AQ==':
+				data['key'] = '1PG7OiApB1nwvP+rz05pAQ=='
+
+			self.channels[channel] = data
+
+			# Prepare the key for decryption
+			try:
+				padded_key = data['key'].ljust(len(data['key']) + ((4 - (len(data['key']) % 4)) % 4), '=')
+				replaced_key = padded_key.replace('-', '+').replace('_', '/')
+				self.channels[channel]['key_bytes'] = base64.b64decode(replaced_key.encode('ascii'))
+			except Exception as e:
+				print(f'Error decoding key for channel {channel}: {e}')
+				raise
 
 		# Set the MQTT callbacks
 		self.client.on_connect    = self.event_mqtt_connect
@@ -142,11 +151,14 @@ class MeshtasticMQTT(object):
 		try:
 			self.client.connect(broker, port, 60)
 		except Exception as e:
-			print(f'Error connecting to MQTT broker: {e}')
+			self.logger.exception(f'Error connecting to MQTT broker: {e}')
 			self.event_mqtt_disconnect(self.client, '', 1, None)
 
-		# Set the subscribe topic
-		self.subscribe_topic = f'{root}{channel}/#'
+		# Set the subscribe topics
+		self.subscribe_topics = []
+		for channel in self.channels:
+			self.logger.info("Subscribing to channel %s", channel)
+			self.subscribe_topics.append(f'{root}{channel}/#')
 
 	def disconnect(self):
 		self.shutting_down = True
@@ -161,7 +173,7 @@ class MeshtasticMQTT(object):
 	def loop_stop(self):
 		self.client.loop_stop()
 
-	def decrypt_message_packet(self, mp):
+	def decrypt_message_packet(self, mp, channel=None):
 		'''
 		Decrypt an encrypted message packet.
 
@@ -173,8 +185,12 @@ class MeshtasticMQTT(object):
 			nonce_from_node = getattr(mp, 'from').to_bytes(8, 'little')
 			nonce = nonce_packet_id + nonce_from_node
 
-			# Decrypt the message
-			cipher = Cipher(algorithms.AES(self.key_bytes), modes.CTR(nonce), backend=default_backend())
+			# Cannot decrypt if we don't know the channel name
+			if not channel:
+				self.logger.info("Cannot decrypt message without channel name")
+				return None
+
+			cipher = Cipher(algorithms.AES(self.channels[channel]['key_bytes']), modes.CTR(nonce), backend=default_backend())
 			decryptor = cipher.decryptor()
 			decrypted_bytes = decryptor.update(getattr(mp, 'encrypted')) + decryptor.finalize()
 
@@ -212,7 +228,8 @@ class MeshtasticMQTT(object):
 		'''
 
 		if rc == 0:
-			client.subscribe(self.subscribe_topic)
+			for topic in self.subscribe_topics:
+				client.subscribe(topic)
 		else:
 			print(f'Failed to connect to MQTT broker: {rc}')
 
@@ -238,12 +255,17 @@ class MeshtasticMQTT(object):
 				print(f'Raw payload: {msg.payload}')
 				return
 
+			# Topic is formatted as root/channelname/!hexid
+			topics = msg.topic.split('/')
+			channel = topics[-2]
+			self.logger.debug("Message on topic %s, channel name: %s", msg.topic, channel)
+
 			# Extract the message packet from the service envelope
 			mp = service_envelope.packet
 
 			# Check if the message is encrypted before decrypting it
 			if mp.HasField('encrypted'):
-				decrypted_mp = self.decrypt_message_packet(mp)
+				decrypted_mp = self.decrypt_message_packet(mp, channel=channel)
 				if decrypted_mp:
 					mp = decrypted_mp
 				else:
@@ -257,6 +279,7 @@ class MeshtasticMQTT(object):
 
 			# Convert to JSON and handle NaN values in one shot
 			json_packet = clean_json(mp)
+			json_packet['channelName'] = channel
 
 			# Process the message based on its type
 			if mp.decoded.portnum == portnums_pb2.ADMIN_APP:

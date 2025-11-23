@@ -49,10 +49,9 @@ client.connect(
     broker='mqtt.meshtastic.org',
     port=1883,
     root='msh/US/2/e/',
-    channel='LongFast',
+    channels={'LongFast': {'key': 'AQ=='}, 'MediumFast': {'key': 'AQ=='}},
     username='meshdev',
     password='large4cats',
-    key='AQ=='
 )
 
 # Start MQTT client loop until interrupted
@@ -82,6 +81,9 @@ def my_callback(json_data):
 If no callback is registered for a message type, the message will be printed to the console by default.
 
 ### Command Line Options
+
+FIXME: Correct this for multiple channels support
+
 | Option       | Description                   | Default               |
 | ------------ | ------------------------------|---------------------- |
 | `--broker`   | MQTT broker address           | `mqtt.meshtastic.org` |
