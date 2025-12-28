@@ -6,6 +6,7 @@ import base64
 import json
 import time
 import logging
+import traceback
 
 try:
 	from cryptography.hazmat.backends           import default_backend
@@ -99,7 +100,7 @@ class MeshtasticMQTT(object):
 			self.callbacks[portnum_name](json_packet)
 		else:
 			# Default behavior - print to console
-			print(f'{json.dumps(json_packet)}')
+			print(f'{json.dumps(json_packet, default=repr)}')
 
 
 	def connect(self, broker: str, port: int, root: str, channels: dict, username: str, password: str):
@@ -257,6 +258,7 @@ class MeshtasticMQTT(object):
 
 			# Topic is formatted as root/channelname/!hexid
 			topics = msg.topic.split('/')
+			uplink = topics[-1]
 			channel = topics[-2]
 			self.logger.debug("Message on topic %s, channel name: %s", msg.topic, channel)
 
@@ -279,6 +281,7 @@ class MeshtasticMQTT(object):
 
 			# Convert to JSON and handle NaN values in one shot
 			json_packet = clean_json(mp)
+			json_packet['uplink'] = uplink
 			json_packet['channelName'] = channel
 
 			# Process the message based on its type
@@ -440,6 +443,7 @@ class MeshtasticMQTT(object):
 
 		except Exception as e:
 			print(f'Error processing message: {e}')
+			print(f'Trace: {traceback.print_exc()}')
 			print(f'Topic: {msg.topic}')
 			print(f'Payload: {msg.payload}')
 
